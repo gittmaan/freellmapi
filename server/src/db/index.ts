@@ -7,6 +7,7 @@ import { runMigrationsSync } from './migrate/runner.js';
 import { initEncryptionKey, isEncryptionKeyInitialized } from '../lib/crypto.js';
 import { restrictAllToOwner, restrictDirToOwner } from '../lib/file-permissions.js';
 import { nodeSqliteFactory } from './node-sqlite.js';
+import { bunSqliteFactory, isBunRuntime } from './bun-sqlite.js';
 import type { Db, DbFactory } from './types.js';
 
 export type { Db, DbFactory } from './types.js';
@@ -42,7 +43,23 @@ function betterSqliteFactory(resolvedPath: string): Db {
   return new BetterSqlite(resolvedPath) as Db;
 }
 
+/**
+ * Default factory selection order:
+ *   1. `bun:sqlite` when running under Bun (1.4+)
+ *   2. `node:sqlite` when on Android (no better-sqlite3 prebuilt)
+ *   3. better-sqlite3 everywhere else (the historical default)
+ *
+ * Operators can override with `FREEAPI_DB_BACKEND=bun|node|better`.
+ */
 export function defaultDbFactory(platform: NodeJS.Platform = process.platform): DbFactory {
+  const explicit = process.env.FREEAPI_DB_BACKEND?.trim().toLowerCase();
+  if (explicit === 'bun') return bunSqliteFactory;
+  if (explicit === 'node') return nodeSqliteFactory;
+  if (explicit === 'better') return betterSqliteFactory;
+  if (explicit && explicit !== '') {
+    throw new Error(`Unknown FREEAPI_DB_BACKEND=${explicit}; expected bun|node|better`);
+  }
+  if (isBunRuntime()) return bunSqliteFactory;
   return platform === 'android' ? nodeSqliteFactory : betterSqliteFactory;
 }
 
